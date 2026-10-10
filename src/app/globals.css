@@ -1,0 +1,384 @@
+/* @import "tailwindcss";
+
+:root {
+  --background: #fff8f0;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-poppins), var(--font-geist-sans), sans-serif;
+  --font-mono: var(--font-geist-mono);
+  --font-poppins: var(--font-poppins);
+  --font-dancing: var(--font-dancing);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-poppins), sans-serif;
+}
+
+html,
+body {
+  overflow-x: clip;
+} */
+
+@import "tailwindcss";
+
+:root {
+  --background: #f6f1e6;
+  --foreground: #211f1a;
+
+  --color-forest: #243822;
+  --color-forest-light: #38512f;
+  --color-sage: #8c9a72;
+  --color-brick: #8a2c21;
+  --color-brick-hover: #6e221a;
+  --color-mustard: #c08829;
+  --color-surface: #fbf8f1;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-forest: var(--color-forest);
+  --color-forest-light: var(--color-forest-light);
+  --color-sage: var(--color-sage);
+  --color-brick: var(--color-brick);
+  --color-brick-hover: var(--color-brick-hover);
+  --color-mustard: var(--color-mustard);
+  --color-surface: var(--color-surface);
+  --font-sans: var(--font-inter), sans-serif;
+  --font-serif: var(--font-cormorant), serif;
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-cormorant), serif;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+@keyframes waveMove {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-wave {
+  animation: waveMove 22s linear infinite;
+}
+
+@keyframes navbarSlideLeft {
+  0% {
+    transform: translateX(-60px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes navbarSlideRight {
+  0% {
+    transform: translateX(60px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-navbar-left {
+  animation: navbarSlideLeft 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-navbar-right {
+  animation: navbarSlideRight 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideDown {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideLeftToRight {
+  0% {
+    transform: translateX(-40px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-left-to-right {
+  opacity: 0;
+  animation: slideLeftToRight 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideRightToLeft {
+  0% {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-right-to-left {
+  opacity: 0;
+  animation: slideRightToLeft 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.delay-100 {
+  animation-delay: 100ms;
+}
+.delay-200 {
+  animation-delay: 200ms;
+}
+.delay-300 {
+  animation-delay: 300ms;
+}
+.delay-450 {
+  animation-delay: 450ms;
+}
+.delay-500 {
+  animation-delay: 500ms;
+}
+.delay-700 {
+  animation-delay: 700ms;
+}
+.delay-800 {
+  animation-delay: 800ms;
+}
+.delay-900 {
+  animation-delay: 900ms;
+}
+.delay-1100 {
+  animation-delay: 1100ms;
+}
+.delay-1200 {
+  animation-delay: 1200ms;
+}
+.delay-1300 {
+  animation-delay: 1300ms;
+}
+
+/* Custom product hero image layout to touch the left edge of the viewport */
+.product-hero-image-container {
+  margin-left: -24px; /* Offsets container's px-6 (24px) padding on mobile */
+  width: calc(100% + 24px);
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  border-left-width: 0 !important;
+  border-top-right-radius: 100px;
+  border-bottom-right-radius: 15px;
+  border-style: solid;
+  border-color: #ffffff;
+  border-top-width: 6px;
+  border-right-width: 6px;
+  border-bottom-width: 6px;
+}
+
+@media (min-width: 1024px) {
+  .product-hero-image-container {
+    margin-left: -24px;
+    width: calc(48% + 24px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .product-hero-image-container {
+    /* At 1280px and wider, container is centered. Offset = (100vw - 1280px)/2 + 24px */
+    margin-left: calc(-1 * (100vw - 1280px) / 2 - 24px);
+    width: calc(48% + (100vw - 1280px) / 2 + 24px);
+  }
+}
+
+@keyframes floatSlow {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-15px) rotate(8deg);
+  }
+}
+
+@keyframes floatSlowReverse {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(15px) rotate(-8deg);
+  }
+}
+
+.animate-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+.animate-float-slow-reverse {
+  animation: floatSlowReverse 7s ease-in-out infinite;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* =========================================================
+   EXPORT MARKETS MAP ANIMATIONS
+   ========================================================= */
+
+@keyframes exportRoute {
+  0% {
+    stroke-dashoffset: 80;
+    opacity: 0.2;
+  }
+
+  35% {
+    opacity: 0.75;
+  }
+
+  70% {
+    opacity: 0.9;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.2;
+  }
+}
+
+.export-route {
+  stroke-linecap: round;
+  animation: exportRoute 4.5s linear infinite;
+}
+
+.export-route-delay {
+  animation-delay: 1.4s;
+}
+
+
+/* =========================================================
+   MAP PIN GLOW
+   ========================================================= */
+
+@keyframes marketPinPulse {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.25;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.55;
+  }
+}
+
+.market-pin-pulse {
+  animation: marketPinPulse 2.2s ease-in-out infinite;
+}
+
+
+/* =========================================================
+   MAP CARD FLOAT
+   ========================================================= */
+
+@keyframes marketCardFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.market-card-float {
+  animation: marketCardFloat 4s ease-in-out infinite;
+}
+
+
+/* =========================================================
+   PLANE / SHIP
+   ========================================================= */
+
+@keyframes exportIconFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.export-moving-icon {
+  animation: exportIconFloat 2.5s ease-in-out infinite;
+}
+
+
+/* =========================================================
+   ACCESSIBILITY
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .export-route,
+  .export-route-delay,
+  .market-pin-pulse,
+  .market-card-float,
+  .export-moving-icon {
+    animation: none !important;
+  }
+}
