@@ -110,7 +110,7 @@ export default function ManufacturingPartnerSection() {
                             {/* Logo: transparent, no background */}
                             <div className="shrink-0 w-40 sm:w-48 md:w-52 lg:w-56">
                                 <Image
-                                    src="/ranthambhore-logo.png"
+                                    src="/Ranthambhore-logo.png"
                                     alt="Ranthambhore Organic Agro Foods logo"
                                     width={500}
                                     height={500}
@@ -215,7 +215,7 @@ export default function ManufacturingPartnerSection() {
                             <div className="flex items-center gap-4 w-full max-w-sm md:w-auto md:max-w-none">
                                 <div className="shrink-0 w-[68px] h-[68px] sm:w-20 sm:h-20 rounded-full bg-surface flex items-center justify-center p-2">
                                     <Image
-                                        src="/ranthambhore-logo.png"
+                                        src="/Ranthambhore-logo.png"
                                         alt="Ranthambhore Organic Agro Foods"
                                         width={80}
                                         height={80}
