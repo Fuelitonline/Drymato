@@ -64,6 +64,7 @@ import AuthModal from "@/components/AuthModal";
 import { WebsiteDataProvider } from "@/context/WebsiteDataContext";
 import AnnouncementMarquee from "@/components/AnnouncementMarquee";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -119,6 +120,7 @@ export default function RootLayout({ children }) {
           </CartProvider>
         </WebsiteDataProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
