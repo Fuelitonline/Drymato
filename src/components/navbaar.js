@@ -774,6 +774,17 @@ const sig = (s) =>
     String(s).toLowerCase().split(/\s+/).map((w) => w.replace(/s$/, "")).sort().join(" ");
 const getBgImage = (label) =>
     STATIC_MENU.find((c) => sig(c.label) === sig(label))?.bgImage || null;
+// Max products shown per category in the menu
+const MENU_LIMIT = 24;
+
+// Backend sends HTML entities (e.g. "&amp;") -> convert to plain text
+const decodeEntities = (str = "") =>
+    String(str)
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;|&apos;/g, "'")
+        .replace(/&amp;/g, "&");
 
 const MENU_ITEMS = [
     { label: "Home", href: "/" },
@@ -932,7 +943,8 @@ export default function Navbar() {
                                                                     : "text-gray-700 hover:bg-white/60 hover:text-forest"
                                                                     }`}
                                                             >
-                                                                {cat.label}
+                                                                {/* {cat.label} */}
+                                                                {decodeEntities(cat.label)}
                                                                 <span className={`text-[11px] font-semibold ${isActiveCat ? "text-white/80" : "text-gray-400"}`}>
                                                                     {cat.items.length}
                                                                 </span>
@@ -944,7 +956,11 @@ export default function Navbar() {
                                                 {/* Right: products for active category */}
                                                 <div className="relative flex-1 min-h-[420px] p-8 bg-surface">
                                                     {PRODUCT_CATEGORIES.map((cat) => {
-                                                        const bg = getBgImage(cat.label);
+                                                        const label = decodeEntities(cat.label);
+                                                        const bg = getBgImage(label);
+                                                        const visibleItems = cat.items.slice(0, MENU_LIMIT);
+                                                        const hasMore = cat.items.length > MENU_LIMIT;
+
                                                         return (
                                                             <div key={cat.key} className={currentCategory === cat.key ? "block" : "hidden"}>
                                                                 {bg && (
@@ -953,25 +969,44 @@ export default function Navbar() {
                                                                     </div>
                                                                 )}
 
-                                                                <h4 className="relative text-[17px] font-serif font-bold text-foreground mb-1">
-                                                                    {cat.label}
-                                                                </h4>
-                                                                <p className="relative text-[12px] text-gray-500 mb-6">
-                                                                    {cat.items.length} products
-                                                                </p>
+                                                                <div className="relative flex items-start justify-between mb-6">
+                                                                    <div>
+                                                                        <h4 className="text-[17px] font-serif font-bold text-foreground mb-1">
+                                                                            {label}
+                                                                        </h4>
+                                                                        <p className="text-[12px] text-gray-500">
+                                                                            {cat.items.length} products
+                                                                        </p>
+                                                                    </div>
+
+                                                                    {hasMore && (
+                                                                        <Link
+                                                                            href={cat.href}
+                                                                            onClick={() => setIsProductOpen(false)}
+                                                                            className="inline-flex items-center gap-1.5 text-[13px] font-bold text-forest no-underline hover:underline"
+                                                                        >
+                                                                            View more
+                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                                                            </svg>
+                                                                        </Link>
+                                                                    )}
+                                                                </div>
 
                                                                 <div className="relative grid grid-flow-col grid-rows-6 auto-cols-[170px] gap-x-8 gap-y-5">
-                                                                    {cat.items.map((product) => (
+                                                                    {visibleItems.map((product) => (
                                                                         <Link
                                                                             key={product.key}
                                                                             href={product.href}
                                                                             onClick={() => setIsProductOpen(false)}
                                                                             className="text-[13px] text-gray-700 hover:text-forest no-underline transition-colors duration-150 whitespace-nowrap"
                                                                         >
-                                                                            {product.name}
+                                                                            {decodeEntities(product.name)}
                                                                         </Link>
                                                                     ))}
                                                                 </div>
+
+
                                                             </div>
                                                         );
                                                     })}
@@ -1153,57 +1188,12 @@ export default function Navbar() {
                                                         }`}
                                                 >
                                                     <div className="flex flex-col gap-1 border-l-2 border-sage/25 pl-3">
-                                                        {/* {PRODUCT_CATEGORIES.map((cat) => {
-                                                            const catOpen = mobileActiveCategory === cat.key;
-                                                            return (
-                                                                <div key={cat.key}>
-                                                                    <button
-                                                                        onClick={() =>
-                                                                            setMobileActiveCategory((prev) =>
-                                                                                prev === cat.key ? null : cat.key
-                                                                            )
-                                                                        }
-                                                                        className="w-full flex items-center justify-between py-2 text-[13px] font-bold text-gray-800 bg-transparent border-0 cursor-pointer"
-                                                                    >
-                                                                        {cat.label}
-                                                                        <svg
-                                                                            className={`w-3 h-3 transition-transform duration-200 ${catOpen ? "rotate-180" : ""
-                                                                                }`}
-                                                                            fill="none"
-                                                                            stroke="currentColor"
-                                                                            strokeWidth="2.5"
-                                                                            viewBox="0 0 24 24"
-                                                                        >
-                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                                                        </svg>
-                                                                    </button>
-                                                                    <div
-                                                                        className={`overflow-hidden transition-all duration-300 ${catOpen ? "max-h-[1000px] pb-2" : "max-h-0"
-                                                                            }`}
-                                                                    >
-                                                                        <div className="flex flex-col gap-2 pl-2">
-                                                                            {cat.items.map((product) => (
-                                                                                <Link
-                                                                                    key={product.href}
-                                                                                    href={product.href}
-                                                                                    onClick={() => {
-                                                                                        setIsMobileMenuOpen(false);
-                                                                                        setMobileProductOpen(false);
-                                                                                        setMobileActiveCategory(null);
-                                                                                    }}
-                                                                                    className="text-[13px] text-gray-600 hover:text-forest no-underline py-1"
-                                                                                >
-                                                                                    {product.name}
-                                                                                </Link>
-                                                                            ))}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })} */}
 
                                                         {PRODUCT_CATEGORIES.map((cat) => {
                                                             const catOpen = mobileActiveCategory === cat.key;
+                                                            const label = decodeEntities(cat.label);
+                                                            const visibleItems = cat.items.slice(0, MENU_LIMIT);
+                                                            const hasMore = cat.items.length > MENU_LIMIT;
                                                             const closeAll = () => {
                                                                 setIsMobileMenuOpen(false);
                                                                 setMobileProductOpen(false);
@@ -1217,11 +1207,11 @@ export default function Navbar() {
                                                                             onClick={closeAll}
                                                                             className="flex-1 text-[13px] font-bold text-gray-800 no-underline"
                                                                         >
-                                                                            {cat.label}
+                                                                            {label}
                                                                         </Link>
                                                                         <button
                                                                             type="button"
-                                                                            aria-label={`Toggle ${cat.label}`}
+                                                                            aria-label={`Toggle ${label}`}
                                                                             onClick={() => setMobileActiveCategory((prev) => (prev === cat.key ? null : cat.key))}
                                                                             className="p-1 bg-transparent border-0 cursor-pointer"
                                                                         >
@@ -1235,16 +1225,25 @@ export default function Navbar() {
                                                                     </div>
                                                                     <div className={`overflow-hidden transition-all duration-300 ${catOpen ? "max-h-[1000px] pb-2" : "max-h-0"}`}>
                                                                         <div className="flex flex-col gap-2 pl-2">
-                                                                            {cat.items.map((product) => (
+                                                                            {visibleItems.map((product) => (
                                                                                 <Link
                                                                                     key={product.key}
                                                                                     href={product.href}
                                                                                     onClick={closeAll}
                                                                                     className="text-[13px] text-gray-600 hover:text-forest no-underline py-1"
                                                                                 >
-                                                                                    {product.name}
+                                                                                    {decodeEntities(product.name)}
                                                                                 </Link>
                                                                             ))}
+                                                                            {hasMore && (
+                                                                                <Link
+                                                                                    href={cat.href}
+                                                                                    onClick={closeAll}
+                                                                                    className="text-[13px] font-bold text-forest no-underline py-1"
+                                                                                >
+                                                                                    View more ({cat.items.length - MENU_LIMIT} more) →
+                                                                                </Link>
+                                                                            )}
                                                                         </div>
                                                                     </div>
                                                                 </div>

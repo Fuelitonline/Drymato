@@ -9,7 +9,14 @@ const STORE_DOMAIN = "Drymato";
 const slugify = (s) =>
     String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-export const getSubcategoryHref = (sub) => `/product/${slugify(sub.name)}`;
+// export const getSubcategoryHref = (sub) => `/product/${slugify(sub.name)}`;
+export const getSubcategoryHref = (sub) => {
+    if (sub?.productSlug) {
+        return `/product/${sub.productSlug}`;
+    }
+
+    return `/product/${slugify(sub?.name || "")}`;
+};
 export const getCategoryHref = (cat) => `/product?category=${encodeURIComponent(cat.name)}`;
 
 const normalize = (json) =>
@@ -20,9 +27,18 @@ const normalize = (json) =>
             label: c.name,
             href: getCategoryHref(c),
             // childCategories intentionally ignored
+            // items: (c.subcategories || [])
+            //     .filter((s) => s && !s.isDeleted)
+            //     .map((s) => ({ key: s._id, name: s.name, href: getSubcategoryHref(s) })),
             items: (c.subcategories || [])
                 .filter((s) => s && !s.isDeleted)
-                .map((s) => ({ key: s._id, name: s.name, href: getSubcategoryHref(s) })),
+                .map((s) => ({
+                    key: s._id,
+                    name: s.name,
+                    productId: s.productId || null,
+                    productSlug: s.productSlug || null,
+                    href: getSubcategoryHref(s)
+                })),
         }));
 
 // module-level cache so the navbar doesn't refetch on every route change

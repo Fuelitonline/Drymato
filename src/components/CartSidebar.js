@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { FaTimes, FaTrashAlt, FaMinus, FaPlus, FaArrowRight, FaChevronDown, FaInfoCircle } from "react-icons/fa";
-import { useCart, PACK_SIZES, MAX_QTY } from "@/context/CartContext";
+import { useCart, PACK_SIZES, MAX_QTY, MAX_PACK_KG } from "@/context/CartContext";
 
 function QtyStepper({ value, onChange }) {
     const [draft, setDraft] = useState(String(value));
@@ -60,8 +60,75 @@ function QtyStepper({ value, onChange }) {
     );
 }
 
+function PackSizeSelect({ item }) {
+    const { updatePackSize } = useCart();
+    const isStandard = PACK_SIZES.includes(item.packSize);
+    const [customOpen, setCustomOpen] = useState(!isStandard);
+    const [draft, setDraft] = useState(isStandard ? "" : String(parseInt(item.packSize, 10) || ""));
+    const showCustom = customOpen || !isStandard;
+
+    const onSelect = (e) => {
+        const v = e.target.value;
+        if (v === "custom") {
+            setCustomOpen(true);
+            return;
+        }
+        setCustomOpen(false);
+        updatePackSize(item.key, v);
+    };
+
+    const commit = () => {
+        const n = Math.min(parseInt(draft, 10) || 0, MAX_PACK_KG);
+        if (n < 1) {
+            if (isStandard) setCustomOpen(false); // nothing typed: go back to the standard size
+            else setDraft(String(parseInt(item.packSize, 10) || ""));
+            return;
+        }
+        setDraft(String(n));
+        updatePackSize(item.key, `${n}kg`);
+        if (PACK_SIZES.includes(`${n}kg`)) setCustomOpen(false);
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            <div className="relative">
+                <select
+                    value={showCustom ? "custom" : item.packSize}
+                    onChange={onSelect}
+                    aria-label="Pack size"
+                    className="appearance-none h-8 pl-3 pr-7 rounded-lg border border-sage/30 bg-white text-xs font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-forest/20 cursor-pointer"
+                >
+                    {PACK_SIZES.map((size) => (
+                        <option key={size} value={size}>{size.replace("kg", " kg")}</option>
+                    ))}
+                    <option value="custom">Custom</option>
+                </select>
+                <FaChevronDown size={9} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-forest pointer-events-none" />
+            </div>
+
+            {showCustom && (
+                <div className="relative">
+                    <input
+                        type="text"
+                        inputMode="numeric"
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value.replace(/\D/g, "").slice(0, 3))}
+                        onBlur={commit}
+                        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                        placeholder="Qty"
+                        aria-label="Custom pack size in kg"
+                        className="w-20 h-8 pl-2.5 pr-7 rounded-lg border border-sage/30 bg-white text-xs font-semibold text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-forest/20"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-gray-400">kg</span>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function CartLine({ item, highlighted }) {
-    const { closeCart, updateQuantity, updatePackSize, removeItem } = useCart();
+    // const { closeCart, updateQuantity, updatePackSize, removeItem } = useCart();
+    const { closeCart, updateQuantity, removeItem } = useCart();
 
     return (
         <li
@@ -104,7 +171,7 @@ function CartLine({ item, highlighted }) {
                     </button>
                 </div>
 
-                <div className="mt-auto pt-3 flex items-end justify-between gap-3">
+                {/* <div className="mt-auto pt-3 flex items-end justify-between gap-3">
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Pack size</p>
                         <div className="relative">
@@ -124,6 +191,16 @@ function CartLine({ item, highlighted }) {
                         </div>
                     </div>
 
+                    <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Quantity</p>
+                        <QtyStepper value={item.quantity} onChange={(q) => updateQuantity(item.key, q)} />
+                    </div>
+                </div> */}
+                <div className="mt-auto pt-3 flex items-end justify-between gap-3">
+                    <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Pack size</p>
+                        <PackSizeSelect item={item} />
+                    </div>
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Quantity</p>
                         <QtyStepper value={item.quantity} onChange={(q) => updateQuantity(item.key, q)} />
