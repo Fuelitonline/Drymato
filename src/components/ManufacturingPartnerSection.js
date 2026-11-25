@@ -173,6 +173,9 @@ export default function ManufacturingPartnerSection() {
                                 Safe Food<br />Better Health
                             </p>
                         </div>
+                        <p className="text-sm font-medium text-forest">
+                            License Number: <span className="font-semibold">12226999000675</span>
+                        </p>
                     </InfoBlock>
 
                     <InfoBlock icon={FaHandshake} title="Drymato — Marketing Partner">

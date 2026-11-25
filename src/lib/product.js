@@ -15,6 +15,10 @@ export const CATEGORY_META = {
     "dehydrated-fruits": { label: "Dehydrated Fruits", bgImage: "/images/categories/dried-fruits.png" },
     "vegetable-powders": { label: "Vegetable Powders", bgImage: "/images/categories/vegetable-powder.png" },
     "fruit-powders": { label: "Fruit Powders", bgImage: "/images/categories/fruit-powder.png" },
+    "herbs-leafy-products": {
+        label: "Herbs & Leafy Products",
+        bgImage: "/images/categories/herbs&leaf.png"
+    },
 };
 
 // ---- Product types (format filter on the listing page) ----

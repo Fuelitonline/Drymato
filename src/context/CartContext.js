@@ -3,9 +3,12 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 
 const STORAGE_KEY = "drymato_cart_v1";
+const BUYNOW_KEY = "drymato_buynow_v1";
 
-export const PACK_SIZES = ["100g", "250g", "500g", "1kg", "5kg", "Bulk"];
-export const DEFAULT_PACK = "1kg";
+export const BULK_KG_OPTIONS = [5, 10, 15, 25, 50];
+export const PACK_SIZES = BULK_KG_OPTIONS.map((n) => `${n}kg`);
+export const DEFAULT_PACK = PACK_SIZES[0]; // used by "Add to Cart" on listing / similar cards
+export const MAX_PACK_KG = 999;
 export const MAX_QTY = 999;
 
 const CartContext = createContext(null);
@@ -37,11 +40,16 @@ export function CartProvider({ children }) {
     const [isOpen, setIsOpen] = useState(false);
     const [lastAddedKey, setLastAddedKey] = useState(null);
     const highlightTimer = useRef(null);
+    const [buyNowItem, setBuyNowItem] = useState(null);
 
     // Load saved cart once on mount, and keep other tabs in sync
     useEffect(() => {
         setItems(readStorage());
         setHydrated(true);
+        try {
+            const raw = window.sessionStorage.getItem(BUYNOW_KEY);
+            if (raw) setBuyNowItem(JSON.parse(raw));
+        } catch { /* ignore */ }
 
         const onStorage = (e) => {
             if (e.key === STORAGE_KEY) setItems(readStorage());
@@ -125,6 +133,16 @@ export function CartProvider({ children }) {
 
     const clearCart = useCallback(() => setItems([]), []);
 
+    const setBuyNow = useCallback((item) => {
+        setBuyNowItem(item);
+        try { window.sessionStorage.setItem(BUYNOW_KEY, JSON.stringify(item)); } catch { }
+    }, []);
+
+    const clearBuyNow = useCallback(() => {
+        setBuyNowItem(null);
+        try { window.sessionStorage.removeItem(BUYNOW_KEY); } catch { }
+    }, []);
+
     const totalQuantity = useMemo(() => items.reduce((sum, i) => sum + i.quantity, 0), [items]);
     const lineCount = items.length;
 
@@ -143,8 +161,11 @@ export function CartProvider({ children }) {
             updatePackSize,
             removeItem,
             clearCart,
+            buyNowItem,
+            setBuyNow,
+            clearBuyNow
         }),
-        [items, hydrated, isOpen, lastAddedKey, totalQuantity, lineCount, openCart, closeCart, addItem, updateQuantity, updatePackSize, removeItem, clearCart]
+        [items, hydrated, isOpen, lastAddedKey, totalQuantity, lineCount, openCart, closeCart, addItem, updateQuantity, updatePackSize, removeItem, clearCart, buyNowItem, setBuyNow, clearBuyNow]
     );
 
     return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

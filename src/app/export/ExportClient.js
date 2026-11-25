@@ -660,12 +660,15 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { parsePhoneNumberFromString, getCountryCallingCode } from "libphonenumber-js";
+import { apiRequest, validators } from "@/context/AuthContext";
 import {
     FaTags, FaHandshake, FaHotel, FaCoffee, FaShoppingCart, FaGlobe, FaIndustry, FaUtensils, FaArrowRight,
-    FaBox, FaRulerCombined, FaChartBar, FaGlobeAsia, FaBuilding, FaMonument, FaLandmark, FaTree, FaPlaceOfWorship
+    FaBox, FaRulerCombined, FaChartBar, FaGlobeAsia, FaBuilding, FaMonument, FaLandmark, FaTree, FaPlaceOfWorship,
+    FaCheckCircle, FaTimes, FaChevronDown
 } from "react-icons/fa";
 
 /* ================= EXPORT PACKAGING ================= */
@@ -1048,6 +1051,863 @@ function ExportMarketsMap() {
     );
 }
 
+/* ================= EXPORT INQUIRY FORM ================= */
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://backend.globalshopify.com";
+const DOMAIN = process.env.NEXT_PUBLIC_STORE_NAME || "Drymato";
+const PRODUCT_SEARCH_PARAM = "search"; // use the same query param your /product page uses for search
+const PRODUCT_PAGE_SIZE = 30;
+const MAX_PRODUCTS = 20;
+
+const BUYER_TYPES = ["Importer", "Distributor", "Wholesaler", "Food Manufacturer", "HORECA", "Other"];
+const PRODUCT_FORMS = ["Powder", "Flakes", "Granules", "Slices", "Whole", "Other"];
+
+// Quantity per product: a preset (sent as quantityKg + packagingRequirement) or custom (numeric input opens)
+const QTY_OPTIONS = [
+    { value: "5 KG", label: "5 KG" },
+    { value: "10 KG", label: "10 KG" },
+    { value: "20 KG", label: "20 KG" },
+    { value: "25 KG", label: "25 KG" },
+    { value: "custom", label: "Custom quantity" },
+];
+
+const SHIPPING_TERMS = [
+    { value: "FOB", title: "FOB – Free On Board", desc: "We load at the Indian port, you arrange freight" },
+    { value: "CIF", title: "CIF – Cost, Insurance & Freight", desc: "We arrange freight and insurance to your port" },
+    { value: "CFR", title: "CFR – Cost & Freight", desc: "We arrange freight to your port, you insure" },
+    { value: "EXW", title: "EXW – Ex Works", desc: "You collect the goods from our facility" },
+    { value: "Not Sure", title: "Not Sure", desc: "Our team will guide you" },
+];
+
+const INITIAL_FORM = {
+    fullName: "",
+    companyName: "",
+    email: "",
+    phone: "",
+    countryIso: "",
+    website: "",
+    buyerType: "",
+    buyerTypeOther: "",
+    destination: "",
+    shippingTerms: "",
+    sampleRequired: "No",
+    message: "",
+    hp: "", // honeypot - must stay empty
+};
+
+const NAME_RE = /^[\p{L}][\p{L}\p{M} .'-]*$/u;
+const WEBSITE_RE = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(\/\S*)?$/i;
+
+const inputBase =
+    "w-full rounded-lg border bg-white px-3.5 py-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors focus:border-[#1e3d2f] focus:ring-1 focus:ring-[#1e3d2f] disabled:cursor-wait disabled:opacity-70";
+
+/* "Drymato Dehydrated Tomato | Slices, Flakes | ..." -> "Drymato Dehydrated Tomato" */
+const shortName = (n) => {
+    const s = String(n || "");
+    return (s.split("|")[0] || s).trim();
+};
+
+function callingCodeOf(iso) {
+    try {
+        return getCountryCallingCode(iso);
+    } catch {
+        return "";
+    }
+}
+
+// Same rule as the backend: valid number, same country, same calling code
+function parsePhone(raw, iso, countryName) {
+    const cleaned = String(raw || "").trim();
+    if (!cleaned) return { error: "Please enter your contact number" };
+    const parsed = parsePhoneNumberFromString(cleaned, iso);
+    if (!parsed || !parsed.isValid()) {
+        return { error: `Enter a valid number for ${countryName || "the selected country"}` };
+    }
+    if (parsed.country !== iso || parsed.countryCallingCode !== callingCodeOf(iso)) {
+        return { error: "This number does not match the selected country code" };
+    }
+    return { parsed };
+}
+
+const qtyKgOf = (p) => (p.qtyChoice === "custom" ? Number(p.qtyCustom) : parseFloat(p.qtyChoice));
+
+function customQtyError(q) {
+    if (String(q).trim() === "") return "Enter quantity in KG";
+    const n = Number(q);
+    if (!Number.isFinite(n) || n < 0.01) return "Minimum 0.01 KG";
+    if (n > 100000000) return "Enter a realistic quantity";
+    return "";
+}
+
+function validateInquiry(v, selected, country) {
+    const e = {};
+
+    const name = v.fullName.trim().replace(/\s+/g, " ");
+    if (!name) e.fullName = "Full name is required";
+    else if (name.length < 2) e.fullName = "Name must be at least 2 characters";
+    else if (name.length > 80) e.fullName = "Name must be 80 characters or fewer";
+    else if (!NAME_RE.test(name)) e.fullName = "Name can only contain letters, spaces and . ' -";
+
+    const company = v.companyName.trim();
+    if (!company) e.companyName = "Company name is required";
+    else if (company.length < 2 || company.length > 120) e.companyName = "Company name must be 2 to 120 characters";
+
+    const emailError = validators.email(v.email);
+    if (emailError) e.email = emailError;
+
+    if (!country) e.country = "Please select your country";
+    if (!v.phone.trim()) e.phone = "Please enter your contact number";
+    else if (!country) e.phone = "Select your country code first";
+    else {
+        const p = parsePhone(v.phone, v.countryIso, country.name);
+        if (p.error) e.phone = p.error;
+    }
+
+    if (v.website.trim() && !WEBSITE_RE.test(v.website.trim())) {
+        e.website = "Enter a valid website, e.g. https://www.example.com";
+    }
+
+    if (!v.buyerType) e.buyerType = "Please select your buyer type";
+    else if (v.buyerType === "Other") {
+        const t = v.buyerTypeOther.trim();
+        if (!t) e.buyerTypeOther = "Please specify your buyer type";
+        else if (t.length < 2 || t.length > 60) e.buyerTypeOther = "Must be 2 to 60 characters";
+    }
+
+    if (selected.length === 0) e.products = "Please select at least one product";
+    selected.forEach((p) => {
+        if (!p.productForm) e[`form-${p.key}`] = "Select product form";
+        else if (p.productForm === "Other") {
+            const t = p.productFormOther.trim();
+            if (!t) e[`formOther-${p.key}`] = "Please specify the product form";
+            else if (t.length < 2 || t.length > 60) e[`formOther-${p.key}`] = "Must be 2 to 60 characters";
+        }
+
+        if (!p.qtyChoice) e[`qty-${p.key}`] = "Select quantity";
+        else if (p.qtyChoice === "custom") {
+            const m = customQtyError(p.qtyCustom);
+            if (m) e[`qtyCustom-${p.key}`] = m;
+        }
+    });
+
+    const dest = v.destination.trim();
+    if (!dest) e.destination = "Destination port / city is required";
+    else if (dest.length < 2 || dest.length > 100) e.destination = "Enter a valid destination (2 to 100 characters)";
+
+    if (v.message.length > 2000) e.message = "Message must be 2000 characters or fewer";
+
+    return e;
+}
+
+function Field({ label, required, error, htmlFor, children, className = "" }) {
+    return (
+        <div className={className}>
+            <label htmlFor={htmlFor} className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-[#1e3d2f]">
+                {label}
+                {required && <span className="text-[#a50808]"> *</span>}
+            </label>
+            {children}
+            {error && (
+                <p className="mt-1.5 text-xs font-medium text-[#a50808]" role="alert">{error}</p>
+            )}
+        </div>
+    );
+}
+
+/* ---------- Type + select in one place: searchable multi-select over the Drymato catalogue ---------- */
+function ProductPicker({ selected, onToggle, hasError, limitReached }) {
+    const wrapRef = useRef(null);
+    const searchRef = useRef(null);
+    const triggerRef = useRef(null);
+    const reqId = useRef(0);
+    const [query, setQuery] = useState("");
+    const [open, setOpen] = useState(false);
+    const [items, setItems] = useState([]);
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [loading, setLoading] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const [highlight, setHighlight] = useState(0);
+
+    const load = useCallback(async (search, pageNo, append) => {
+        const id = ++reqId.current;
+        setLoading(true);
+        setFailed(false);
+        try {
+            const params = new URLSearchParams({ page: String(pageNo), limit: String(PRODUCT_PAGE_SIZE) });
+            if (search) params.set(PRODUCT_SEARCH_PARAM, search);
+            const res = await fetch(`${API_BASE}/product/public/store/${encodeURIComponent(DOMAIN)}?${params}`);
+            if (!res.ok) throw new Error("failed");
+            const json = await res.json();
+            if (id !== reqId.current) return; // a newer request replaced this one
+
+            const mapped = (json?.data?.products || [])
+                .filter((p) => p?._id && p?.name)
+                .map((p) => ({ id: String(p._id), name: shortName(p.name) }));
+
+            setItems((prev) =>
+                append ? [...prev, ...mapped.filter((m) => !prev.some((x) => x.id === m.id))] : mapped
+            );
+            setPage(json?.data?.page || pageNo);
+            setTotalPages(json?.data?.totalPages || 1);
+            setHighlight(0);
+        } catch {
+            if (id === reqId.current) setFailed(true);
+        } finally {
+            if (id === reqId.current) setLoading(false);
+        }
+    }, []);
+
+    // fetch on open and (debounced) while typing
+    useEffect(() => {
+        if (!open) return;
+        const t = setTimeout(() => load(query.trim(), 1, false), query ? 300 : 0);
+        return () => clearTimeout(t);
+    }, [query, open, load]);
+
+    // focus the search box when the panel opens
+    useEffect(() => {
+        if (open) setTimeout(() => searchRef.current?.focus(), 0);
+    }, [open]);
+
+    // close on outside click
+    useEffect(() => {
+        const onDown = (e) => {
+            if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+        };
+        document.addEventListener("mousedown", onDown);
+        return () => document.removeEventListener("mousedown", onDown);
+    }, []);
+
+    const q = query.trim().toLowerCase();
+    const visible = items.filter((i) => !q || i.name.toLowerCase().includes(q));
+    const isPicked = (id) => selected.some((s) => s.key === id);
+
+    const toggle = (item) => {
+        if (!item) return;
+        if (!isPicked(item.id) && limitReached) return;
+        onToggle(item);
+    };
+
+    const onKeyDown = (e) => {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlight((h) => Math.min(h + 1, Math.max(visible.length - 1, 0)));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(h - 1, 0));
+        } else if (e.key === "Enter") {
+            e.preventDefault(); // never submit the form from here
+            toggle(visible[highlight]);
+        } else if (e.key === "Escape") {
+            setOpen(false);
+            triggerRef.current?.focus();
+        }
+    };
+
+    return (
+        <div ref={wrapRef} className="relative">
+            <button
+                ref={triggerRef}
+                id="exp-products"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={open}
+                onClick={() => setOpen((o) => !o)}
+                className={`${inputBase} flex items-center justify-between gap-3 text-left ${hasError ? "border-[#a50808]" : "border-gray-300"}`}
+            >
+                <span className={selected.length ? "text-gray-900" : "text-gray-400"}>
+                    {selected.length
+                        ? `${selected.length} product${selected.length > 1 ? "s" : ""} selected`
+                        : "Select products"}
+                </span>
+                <FaChevronDown className={`h-3 w-3 shrink-0 text-gray-500 transition-transform ${open ? "rotate-180" : ""}`} />
+            </button>
+
+            {open && (
+                <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+                    <div className="border-b border-gray-100 p-2.5">
+                        <input
+                            ref={searchRef}
+                            type="text"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            onKeyDown={onKeyDown}
+                            autoComplete="off"
+                            placeholder="Search products..."
+                            aria-label="Search products"
+                            className="w-full rounded-lg border border-[#1e3d2f]/40 px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#1e3d2f]"
+                        />
+                    </div>
+
+                    <ul role="listbox" aria-multiselectable="true" className="max-h-64 overflow-y-auto py-1">
+                        {visible.map((item, i) => {
+                            const picked = isPicked(item.id);
+                            const disabled = !picked && limitReached;
+                            return (
+                                <li
+                                    key={item.id}
+                                    role="option"
+                                    aria-selected={picked}
+                                    aria-disabled={disabled}
+                                    onMouseEnter={() => setHighlight(i)}
+                                    onClick={() => toggle(item)}
+                                    className={`flex items-center gap-3 px-4 py-2.5 text-sm ${disabled ? "cursor-not-allowed text-gray-300" : "cursor-pointer text-gray-800"
+                                        } ${i === highlight ? "bg-[#f4f6f4]" : ""}`}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={picked}
+                                        readOnly
+                                        tabIndex={-1}
+                                        className="pointer-events-none h-4 w-4 shrink-0 accent-[#1e3d2f]"
+                                    />
+                                    <span>{item.name}</span>
+                                </li>
+                            );
+                        })}
+
+                        {loading && <li className="px-4 py-2.5 text-xs text-gray-500">Loading products...</li>}
+
+                        {!loading && failed && (
+                            <li className="px-4 py-2.5 text-xs text-[#a50808]">Could not load products. Please try again.</li>
+                        )}
+
+                        {!loading && !failed && visible.length === 0 && (
+                            <li className="px-4 py-2.5 text-xs text-gray-500">No matching products</li>
+                        )}
+
+                        {!loading && !failed && page < totalPages && (
+                            <li className="border-t border-gray-100 px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => load(query.trim(), page + 1, true)}
+                                    className="text-xs font-bold uppercase tracking-wider text-[#1e3d2f] hover:text-[#a50808]"
+                                >
+                                    Load more
+                                </button>
+                            </li>
+                        )}
+                    </ul>
+
+                    {limitReached && (
+                        <p className="border-t border-gray-100 px-4 py-2 text-[11px] text-gray-500">
+                            Maximum {MAX_PRODUCTS} products per inquiry
+                        </p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ExportInquiryForm() {
+    const [values, setValues] = useState(INITIAL_FORM);
+    // [{ key, productId, name, productForm, productFormOther, qtyChoice, qtyCustom }]
+    const [selected, setSelected] = useState([]);
+    const [errors, setErrors] = useState({});
+    const [attempted, setAttempted] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [submitted, setSubmitted] = useState(false);
+    const [serverError, setServerError] = useState("");
+    const [geo, setGeo] = useState(null);
+
+    // Country data is large, so it is loaded lazily as a separate chunk (same library as checkout)
+    useEffect(() => {
+        let alive = true;
+        import("country-state-city")
+            .then((m) => alive && setGeo({ Country: m.Country }))
+            .catch(() => alive && setServerError("Could not load country data. Please refresh the page."));
+        return () => {
+            alive = false;
+        };
+    }, []);
+
+    // Only countries with a known calling code can pass the backend phone check
+    const countries = useMemo(() => {
+        if (!geo) return [];
+        return geo.Country.getAllCountries()
+            .map((c) => ({ isoCode: c.isoCode, name: c.name, dial: callingCodeOf(c.isoCode) }))
+            .filter((c) => c.dial)
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [geo]);
+
+    const country = useMemo(
+        () => countries.find((c) => c.isoCode === values.countryIso) || null,
+        [countries, values.countryIso]
+    );
+
+    const clearErr = (...names) =>
+        setErrors((prev) => {
+            const next = { ...prev };
+            names.forEach((n) => delete next[n]);
+            return next;
+        });
+
+    const runField = (name, nextValues = values, nextSelected = selected) => {
+        const all = validateInquiry(nextValues, nextSelected, country);
+        setErrors((prev) => ({ ...prev, [name]: all[name] }));
+    };
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        const next = { ...values, [name]: value };
+        setValues(next);
+        if (attempted || errors[name]) runField(name, next);
+        if (name === "buyerType" && value !== "Other") clearErr("buyerTypeOther");
+    };
+
+    const handleBlur = (e) => runField(e.target.name);
+
+    // Country code and Country are one value: backend needs the phone to belong to the selected country
+    const handleCountryChange = (e) => {
+        setValues((prev) => ({ ...prev, countryIso: e.target.value }));
+        clearErr("country", "phone");
+    };
+
+    const handlePhoneChange = (e) => {
+        const value = e.target.value.replace(/[^\d+\s\-()]/g, "");
+        const next = { ...values, phone: value };
+        setValues(next);
+        if (attempted || errors.phone) runField("phone", next);
+    };
+
+    /* ---------- products ---------- */
+    const toggleProduct = (item) => {
+        const exists = selected.some((s) => s.key === item.id);
+        let next;
+        if (exists) {
+            next = selected.filter((s) => s.key !== item.id);
+            clearErr(`form-${item.id}`, `formOther-${item.id}`, `qty-${item.id}`, `qtyCustom-${item.id}`);
+        } else {
+            if (selected.length >= MAX_PRODUCTS) return;
+            next = [
+                ...selected,
+                { key: item.id, productId: item.id, name: item.name, productForm: "", productFormOther: "", qtyChoice: "", qtyCustom: "" },
+            ];
+        }
+        setSelected(next);
+        if (attempted) setErrors(validateInquiry(values, next, country));
+        else clearErr("products");
+    };
+
+    const updateProduct = (key, patch) => {
+        const next = selected.map((p) => (p.key === key ? { ...p, ...patch } : p));
+        setSelected(next);
+        if (attempted) setErrors(validateInquiry(values, next, country));
+    };
+
+    const cls = (name) => `${inputBase} ${errors[name] ? "border-[#a50808]" : "border-gray-300"}`;
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (submitting) return;
+        setServerError("");
+        setAttempted(true);
+
+        const found = validateInquiry(values, selected, country);
+        setErrors(found);
+        const firstKey = Object.keys(found)[0];
+        if (firstKey) {
+            document.getElementById(`exp-${firstKey}`)?.focus();
+            return;
+        }
+
+        // bots fill the hidden field - pretend success, send nothing
+        if (values.hp) {
+            setSubmitted(true);
+            return;
+        }
+
+        const { parsed } = parsePhone(values.phone, values.countryIso, country.name);
+        const website = values.website.trim();
+
+        const payload = {
+            domain: DOMAIN,
+            fullName: values.fullName.trim().replace(/\s+/g, " "),
+            companyName: values.companyName.trim(),
+            email: values.email.trim().toLowerCase(),
+            phone: parsed.nationalNumber,
+            country: country.name,
+            countryCode: `+${country.dial}`,
+            countryIsoCode: country.isoCode,
+            websiteUrl: website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : "",
+            buyerType: values.buyerType,
+            buyerTypeOther: values.buyerType === "Other" ? values.buyerTypeOther.trim() : "",
+            // products: selected.map((p) => ({
+            //     productId: p.productId,
+            //     quantityKg: qtyKgOf(p),
+            //     productForm: p.productForm,
+            //     productFormOther: p.productForm === "Other" ? p.productFormOther.trim() : "",
+            //     packagingRequirement: p.qtyChoice === "custom" ? "Custom Bulk Packaging" : p.qtyChoice,
+            // })),
+            products: selected.map((p) => {
+                const item = {
+                    productId: p.productId,
+                    productForm: p.productForm,
+                    productFormOther: p.productForm === "Other" ? p.productFormOther.trim() : "",
+                };
+                if (p.qtyChoice === "custom") {
+                    // custom quantity: send the typed KG value
+                    item.quantityKg = Number(p.qtyCustom);
+                    item.packagingRequirement = "Custom Bulk Packaging";
+                } else {
+                    // preset quantity: only the selected option, no duplicate quantityKg
+                    item.packagingRequirement = p.qtyChoice;
+                }
+                return item;
+            }),
+            destinationPortCity: values.destination.trim(),
+            preferredShippingTerms: values.shippingTerms,
+            sampleRequired: values.sampleRequired === "Yes",
+            additionalRequirements: values.message.trim(),
+        };
+
+        setSubmitting(true);
+        try {
+            await apiRequest("/exportinquiry/submitexportinquiry", { method: "POST", body: payload, authed: false });
+            setSubmitted(true);
+            setValues(INITIAL_FORM);
+            setSelected([]);
+            setErrors({});
+            setAttempted(false);
+            window.scrollTo({ top: document.getElementById("export-inquiry")?.offsetTop ?? 0, behavior: "smooth" });
+        } catch (err) {
+            const message = err?.message || "Unable to submit your inquiry. Please try again.";
+            if (/phone|mobile/i.test(message)) setErrors({ phone: message });
+            setServerError(message);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <section
+            id="export-inquiry"
+            className="relative w-full scroll-mt-20 border-b border-gray-200/80 bg-white py-16 sm:py-24 lg:py-28"
+        >
+            <div className="mx-auto max-w-7xl px-4 sm:px-8">
+                <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-14">
+                    {/* ============ LEFT: INTRO ============ */}
+                    <div className="reveal-fade-up lg:sticky lg:top-28 lg:col-span-4 lg:self-start">
+                        <div className="mb-4 flex items-center gap-3">
+                            <span className="h-[2px] w-8 bg-[#a50808]" />
+                            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#a50808] sm:text-xs">
+                                Export Inquiry
+                            </span>
+                        </div>
+                        <h2 className="font-serif text-3xl font-bold leading-[1.15] text-[#1e3d2f] sm:text-4xl lg:text-[42px]">
+                            Tell Us What
+                            <br />
+                            <span className="text-[#a50808]">You Need</span>
+                        </h2>
+                        <p className="mt-5 max-w-md text-sm leading-relaxed text-gray-600 sm:text-base">
+                            Looking for premium dehydrated vegetables, fruits, herbs or food ingredients in bulk? Fill out the form with your requirements and our team will contact you with a customised export quotation.
+                        </p>
+                        <p className="mt-4 text-xs italic text-gray-500">Fields marked with * are mandatory.</p>
+                    </div>
+
+                    {/* ============ RIGHT: FORM ============ */}
+                    <div className="reveal-fade-up lg:col-span-8">
+                        <div className="rounded-[24px] border border-[#1e3d2f]/10 bg-[#f4f6f4] p-4 shadow-[0_12px_30px_rgba(30,61,47,0.06)] sm:rounded-[28px] sm:p-8 lg:p-10">
+                            {submitted ? (
+                                <div className="py-10 text-center" role="status">
+                                    <FaCheckCircle className="mx-auto mb-5 h-12 w-12 text-[#5f6b3f]" />
+                                    <h3 className="font-serif text-2xl font-bold text-[#1e3d2f] sm:text-3xl">
+                                        Thank you for your export inquiry!
+                                    </h3>
+                                    <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-gray-600 sm:text-base">
+                                        Your request has been submitted successfully. Our team will review your requirements and contact you shortly.
+                                    </p>
+                                    <p className="mt-8 font-serif text-lg font-bold tracking-wide text-[#a50808]">DRYMATO</p>
+                                    <p className="mt-1 text-xs italic text-gray-500">
+                                        Premium Dehydrated Food Ingredients | Bulk Supply | Export Inquiries
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSubmitted(false)}
+                                        className="mt-8 text-xs font-bold uppercase tracking-widest text-[#1e3d2f] underline underline-offset-4 hover:text-[#a50808]"
+                                    >
+                                        Submit another inquiry
+                                    </button>
+                                </div>
+                            ) : (
+                                <form onSubmit={handleSubmit} noValidate className="space-y-10">
+                                    {/* honeypot */}
+                                    <input
+                                        type="text"
+                                        name="hp"
+                                        value={values.hp}
+                                        onChange={handleChange}
+                                        tabIndex={-1}
+                                        autoComplete="off"
+                                        aria-hidden="true"
+                                        className="absolute -left-[9999px] h-0 w-0 opacity-0"
+                                    />
+
+                                    {/* ================= Buyer Information ================= */}
+                                    <fieldset>
+                                        <legend className="mb-5 font-serif text-xl font-bold text-[#1e3d2f]">Buyer Information</legend>
+                                        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                                            <Field label="Full Name" required htmlFor="exp-fullName" error={errors.fullName}>
+                                                <input id="exp-fullName" name="fullName" type="text" autoComplete="name" value={values.fullName} onChange={handleChange} onBlur={handleBlur} className={cls("fullName")} placeholder="Your full name" maxLength={80} />
+                                            </Field>
+
+                                            <Field label="Company Name" required htmlFor="exp-companyName" error={errors.companyName}>
+                                                <input id="exp-companyName" name="companyName" type="text" autoComplete="organization" value={values.companyName} onChange={handleChange} onBlur={handleBlur} className={cls("companyName")} placeholder="Your company" maxLength={120} />
+                                            </Field>
+
+                                            <Field label="Email Address" required htmlFor="exp-email" error={errors.email}>
+                                                <input id="exp-email" name="email" type="email" autoComplete="email" value={values.email} onChange={handleChange} onBlur={handleBlur} className={cls("email")} placeholder="you@company.com" maxLength={254} />
+                                            </Field>
+
+                                            <Field label="WhatsApp / Contact Number" required htmlFor="exp-phone" error={errors.phone}>
+                                                <div className="flex gap-2">
+                                                    <select
+                                                        name="dialCode"
+                                                        aria-label="Country code"
+                                                        value={values.countryIso}
+                                                        onChange={handleCountryChange}
+                                                        disabled={!geo}
+                                                        className={`${inputBase} ${errors.phone ? "border-[#a50808]" : "border-gray-300"} !w-[104px] shrink-0 !px-2.5 sm:!w-[116px]`}
+                                                    >
+                                                        <option value="">{geo ? "Code" : "..."}</option>
+                                                        {countries.map((c) => (
+                                                            <option key={c.isoCode} value={c.isoCode} title={c.name}>
+                                                                {c.isoCode} +{c.dial}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <input id="exp-phone" name="phone" type="tel" inputMode="tel" autoComplete="tel-national" value={values.phone} onChange={handlePhoneChange} onBlur={handleBlur} className={`${cls("phone")} min-w-0`} placeholder="Contact number" maxLength={20} />
+                                                </div>
+                                            </Field>
+
+                                            <Field label="Country" required htmlFor="exp-country" error={errors.country}>
+                                                <select id="exp-country" name="country" value={values.countryIso} onChange={handleCountryChange} onBlur={() => runField("country")} disabled={!geo} className={cls("country")}>
+                                                    <option value="">{geo ? "Select country" : "Loading countries..."}</option>
+                                                    {countries.map((c) => (
+                                                        <option key={c.isoCode} value={c.isoCode}>{c.name}</option>
+                                                    ))}
+                                                </select>
+                                            </Field>
+
+                                            <Field label="Company Website" htmlFor="exp-website" error={errors.website}>
+                                                <input id="exp-website" name="website" type="url" inputMode="url" value={values.website} onChange={handleChange} onBlur={handleBlur} className={cls("website")} placeholder="https://www.example.com (optional)" />
+                                            </Field>
+
+                                            <Field label="Buyer Type" required htmlFor="exp-buyerType" error={errors.buyerType} className={values.buyerType === "Other" ? "" : "sm:col-span-2"}>
+                                                <select id="exp-buyerType" name="buyerType" value={values.buyerType} onChange={handleChange} onBlur={handleBlur} className={cls("buyerType")}>
+                                                    <option value="">Select buyer type</option>
+                                                    {BUYER_TYPES.map((o) => (
+                                                        <option key={o} value={o}>{o}</option>
+                                                    ))}
+                                                </select>
+                                            </Field>
+
+                                            {values.buyerType === "Other" && (
+                                                <Field label="Specify Buyer Type" required htmlFor="exp-buyerTypeOther" error={errors.buyerTypeOther}>
+                                                    <input id="exp-buyerTypeOther" name="buyerTypeOther" type="text" value={values.buyerTypeOther} onChange={handleChange} onBlur={handleBlur} className={cls("buyerTypeOther")} placeholder="e.g. Retail chain, Trader" maxLength={60} />
+                                                </Field>
+                                            )}
+                                        </div>
+                                    </fieldset>
+
+                                    {/* ================= Product Requirements ================= */}
+                                    <fieldset>
+                                        <legend className="mb-5 font-serif text-xl font-bold text-[#1e3d2f]">Product Requirements</legend>
+                                        <div className="space-y-4">
+                                            <Field label="Products Required" required htmlFor="exp-products" error={errors.products}>
+                                                <ProductPicker
+                                                    selected={selected}
+                                                    onToggle={toggleProduct}
+                                                    hasError={!!errors.products}
+                                                    limitReached={selected.length >= MAX_PRODUCTS}
+                                                />
+                                            </Field>
+
+                                            {/* One card per selected product */}
+                                            {selected.length > 0 && (
+                                                <ul className="space-y-3">
+                                                    {selected.map((p) => (
+                                                        <li key={p.key} className="rounded-xl border border-gray-200 bg-white p-4">
+                                                            <div className="mb-4 flex items-start justify-between gap-3">
+                                                                <p className="text-sm font-bold leading-snug text-gray-900">{p.name}</p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => toggleProduct({ id: p.key })}
+                                                                    aria-label={`Remove ${p.name}`}
+                                                                    className="mt-0.5 shrink-0 text-gray-400 transition-colors hover:text-[#a50808]"
+                                                                >
+                                                                    <FaTimes className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                                                <Field label="Product Form" required htmlFor={`exp-form-${p.key}`} error={errors[`form-${p.key}`]}>
+                                                                    <select
+                                                                        id={`exp-form-${p.key}`}
+                                                                        value={p.productForm}
+                                                                        onChange={(e) => updateProduct(p.key, { productForm: e.target.value })}
+                                                                        onBlur={() => runField(`form-${p.key}`)}
+                                                                        className={cls(`form-${p.key}`)}
+                                                                    >
+                                                                        <option value="">Select form</option>
+                                                                        {PRODUCT_FORMS.map((o) => (
+                                                                            <option key={o} value={o}>{o}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </Field>
+
+                                                                <Field label="Quantity" required htmlFor={`exp-qty-${p.key}`} error={errors[`qty-${p.key}`]}>
+                                                                    <select
+                                                                        id={`exp-qty-${p.key}`}
+                                                                        value={p.qtyChoice}
+                                                                        onChange={(e) =>
+                                                                            updateProduct(p.key, {
+                                                                                qtyChoice: e.target.value,
+                                                                                qtyCustom: e.target.value === "custom" ? p.qtyCustom : "",
+                                                                            })
+                                                                        }
+                                                                        onBlur={() => runField(`qty-${p.key}`)}
+                                                                        className={cls(`qty-${p.key}`)}
+                                                                    >
+                                                                        <option value="">Select quantity</option>
+                                                                        {QTY_OPTIONS.map((o) => (
+                                                                            <option key={o.value} value={o.value}>{o.label}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </Field>
+
+                                                                {p.productForm === "Other" && (
+                                                                    <Field label="Specify Form" required htmlFor={`exp-formOther-${p.key}`} error={errors[`formOther-${p.key}`]} className="sm:col-start-1">
+                                                                        <input
+                                                                            id={`exp-formOther-${p.key}`}
+                                                                            type="text"
+                                                                            value={p.productFormOther}
+                                                                            onChange={(e) => updateProduct(p.key, { productFormOther: e.target.value })}
+                                                                            onBlur={() => runField(`formOther-${p.key}`)}
+                                                                            className={cls(`formOther-${p.key}`)}
+                                                                            placeholder="e.g. Crushed, Cubes"
+                                                                            maxLength={60}
+                                                                        />
+                                                                    </Field>
+                                                                )}
+
+                                                                {p.qtyChoice === "custom" && (
+                                                                    <Field label="Custom Quantity (KG)" required htmlFor={`exp-qtyCustom-${p.key}`} error={errors[`qtyCustom-${p.key}`]} className="sm:col-start-2">
+                                                                        <input
+                                                                            id={`exp-qtyCustom-${p.key}`}
+                                                                            type="number"
+                                                                            inputMode="decimal"
+                                                                            min="0.01"
+                                                                            step="any"
+                                                                            value={p.qtyCustom}
+                                                                            onChange={(e) => updateProduct(p.key, { qtyCustom: e.target.value })}
+                                                                            onBlur={() => runField(`qtyCustom-${p.key}`)}
+                                                                            className={cls(`qtyCustom-${p.key}`)}
+                                                                            placeholder="e.g. 500"
+                                                                        />
+                                                                    </Field>
+                                                                )}
+                                                            </div>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    </fieldset>
+
+                                    {/* ================= Shipping & Export Details ================= */}
+                                    <fieldset>
+                                        <legend className="mb-5 font-serif text-xl font-bold text-[#1e3d2f]">Shipping &amp; Export Details</legend>
+                                        <div className="space-y-5">
+                                            <Field label="Destination Port / City" required htmlFor="exp-destination" error={errors.destination}>
+                                                <input id="exp-destination" name="destination" type="text" value={values.destination} onChange={handleChange} onBlur={handleBlur} className={cls("destination")} placeholder="e.g. Jebel Ali, Dubai" maxLength={100} />
+                                            </Field>
+
+                                            <div>
+                                                <div className="mb-2 flex items-center justify-between">
+                                                    <span className="block text-xs font-bold uppercase tracking-wider text-[#1e3d2f]">Preferred Shipping Terms</span>
+                                                    {values.shippingTerms && (
+                                                        <button type="button" onClick={() => setValues((p) => ({ ...p, shippingTerms: "" }))} className="text-[11px] font-semibold text-gray-500 underline underline-offset-2 hover:text-[#a50808]">
+                                                            Clear
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div role="radiogroup" aria-label="Preferred shipping terms" className="space-y-2">
+                                                    {SHIPPING_TERMS.map((t) => {
+                                                        const checked = values.shippingTerms === t.value;
+                                                        return (
+                                                            <label
+                                                                key={t.value}
+                                                                className={`flex cursor-pointer items-start gap-3 rounded-lg border bg-white px-4 py-3 transition-colors sm:items-center ${checked ? "border-[#1e3d2f] ring-1 ring-[#1e3d2f]" : "border-gray-300 hover:border-[#1e3d2f]/50"
+                                                                    }`}
+                                                            >
+                                                                <input
+                                                                    type="radio"
+                                                                    name="shippingTerms"
+                                                                    value={t.value}
+                                                                    checked={checked}
+                                                                    onChange={handleChange}
+                                                                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#a50808] sm:mt-0"
+                                                                />
+                                                                <span className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+                                                                    <span className="text-sm font-bold text-gray-900">{t.title}</span>
+                                                                    <span className="hidden text-xs text-gray-400 sm:inline">|</span>
+                                                                    <span className="text-xs text-gray-500">{t.desc}</span>
+                                                                </span>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-[#1e3d2f]">Sample Required?</span>
+                                                <div className="flex items-center gap-6">
+                                                    {["Yes", "No"].map((opt) => (
+                                                        <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-800">
+                                                            <input type="radio" name="sampleRequired" value={opt} checked={values.sampleRequired === opt} onChange={handleChange} className="h-4 w-4 accent-[#a50808]" />
+                                                            {opt}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+
+                                    {/* ================= Additional Information ================= */}
+                                    <fieldset>
+                                        <legend className="mb-5 font-serif text-xl font-bold text-[#1e3d2f]">Additional Information</legend>
+                                        <Field label="Additional Requirements / Message" htmlFor="exp-message" error={errors.message}>
+                                            <textarea id="exp-message" name="message" rows={5} value={values.message} onChange={handleChange} onBlur={handleBlur} maxLength={2000} className={`${cls("message")} resize-y`} placeholder="Please mention any specific product specifications, mesh size, packaging preferences, required documents, or delivery timeline." />
+                                            <p className="mt-1 text-right text-[11px] text-gray-400">{values.message.length}/2000</p>
+                                        </Field>
+                                    </fieldset>
+
+                                    {serverError && (
+                                        <div className="rounded-lg border border-[#a50808]/30 bg-[#a50808]/5 px-4 py-3 text-sm font-medium text-[#a50808]" role="alert">
+                                            {serverError}
+                                        </div>
+                                    )}
+
+                                    <button
+                                        type="submit"
+                                        disabled={submitting}
+                                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-forest px-6 py-4 text-sm font-bold uppercase tracking-widest text-white shadow-md transition-all duration-200 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                                    >
+                                        {submitting ? "Submitting..." : "Request Export Quote"}
+                                        {!submitting && <FaArrowRight className="h-3.5 w-3.5" />}
+                                    </button>
+                                </form>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+}
+
 export default function ExportClient() {
 
     const [active, setActive] = useState(0);
@@ -1253,7 +2113,7 @@ export default function ExportClient() {
                             Browse Wholesale Products <FaArrowRight className="w-3 h-3" />
                         </Link>
                         <Link
-                            href="/contact"
+                            href="#export-inquiry"
                             className="w-full sm:w-auto border border-white/40 hover:border-white/70 hover:bg-white/5 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 rounded-sm inline-flex items-center justify-center transition-colors"
                         >
                             Request Bulk Quote
@@ -1358,10 +2218,13 @@ export default function ExportClient() {
                                         </div>
 
                                         {/* Send Export Enquiry Button */}
-                                        <button className="w-full py-4 px-6 rounded-xl bg-forest text-white font-semibold text-sm sm:text-base tracking-wide shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center space-x-2 group">
+                                        <a
+                                            href="#export-inquiry"
+                                            className="w-full py-4 px-6 rounded-xl bg-forest text-white font-semibold text-sm sm:text-base tracking-wide shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center space-x-2 group"
+                                        >
                                             <span>Send Export Enquiry</span>
                                             <FaArrowRight className="group-hover:translate-x-1 transition-transform" />
-                                        </button>
+                                        </a>
                                     </div>
 
                                 </div>
@@ -1755,16 +2618,16 @@ export default function ExportClient() {
                                                         <span
                                                             key={tag}
                                                             className={`
-                                px-2.5 py-1
-                                rounded-full
-                                border
-                                text-[10px]
-                                font-semibold
-                                uppercase
-                                tracking-wider
-                                transition-all duration-500
+                                                                px-2.5 py-1
+                                                                rounded-full
+                                                                border
+                                                                text-[10px]
+                                                                font-semibold
+                                                                uppercase
+                                                                tracking-wider
+                                                                transition-all duration-500
 
-                                ${isActive
+                                                                ${isActive
                                                                     ? `
                                             ${pastel.tag}
                                             text-[#3d3935]
@@ -1787,21 +2650,21 @@ export default function ExportClient() {
                                             {/* ================= ACTIVE BOTTOM LINE ================= */}
                                             <span
                                                 className={`
-                    absolute
-                    bottom-4
-                    left-7
-                    h-[3px]
-                    rounded-full
+                                                    absolute
+                                                    bottom-4
+                                                    left-7
+                                                    h-[3px]
+                                                    rounded-full
 
-                    ${pastel.badge.replace("bg-", "bg-")}
+                                                    ${pastel.badge.replace("bg-", "bg-")}
 
-                    transition-all duration-500
+                                                    transition-all duration-500
 
-                    ${isActive
+                                                    ${isActive
                                                         ? "w-10 opacity-100"
                                                         : "w-0 opacity-0"
                                                     }
-                `}
+                                                `}
                                             />
 
                                         </button>
@@ -1848,40 +2711,40 @@ export default function ExportClient() {
                             <div className="flex items-center justify-center gap-3 mb-3">
                                 <span className="w-6 sm:w-8 h-[2px] bg-[#a50808]" />
                                 <span className="
-                    text-[10px]
-                    sm:text-xs
-                    font-bold
-                    uppercase
-                    tracking-[0.22em]
-                    text-[#a50808]
-                ">
+                                    text-[10px]
+                                    sm:text-xs
+                                    font-bold
+                                    uppercase
+                                    tracking-[0.22em]
+                                    text-[#a50808]
+                                ">
                                     Multiple Products. One Sourcing Conversation.
                                 </span>
                                 <span className="w-6 sm:w-8 h-[2px] bg-[#a50808]" />
                             </div>
 
                             <h2 className="
-                font-serif
-                text-3xl
-                sm:text-4xl
-                lg:text-[42px]
-                font-medium
-                leading-[1.15]
-                text-[#1e3d2f]
-            ">
+                                font-serif
+                                text-3xl
+                                sm:text-4xl
+                                lg:text-[42px]
+                                font-medium
+                                leading-[1.15]
+                                text-[#1e3d2f]
+                            ">
                                 Building a Mixed Ingredient <br className="hidden sm:block" />
                                 <span className="text-[#a50808]">Requirement?</span>
                             </h2>
 
                             {/* For example */}
                             <p className="
-                mt-6
-                text-xs
-                font-bold
-                uppercase
-                tracking-[0.18em]
-                text-[#1e3d2f]/70
-            ">
+                                mt-6
+                                text-xs
+                                font-bold
+                                uppercase
+                                tracking-[0.18em]
+                                text-[#1e3d2f]/70
+                            ">
                                 For example:
                             </p>
 
@@ -1889,55 +2752,55 @@ export default function ExportClient() {
 
                         {/* ================= EXAMPLE CARDS ================= */}
                         <div className="
-            mt-6
-            grid
-            grid-cols-1
-            md:grid-cols-3
-            gap-4
-            max-w-3xl
-            mx-auto
-            relative
-        ">
+                            mt-6
+                            grid
+                            grid-cols-1
+                            md:grid-cols-3
+                            gap-4
+                            max-w-3xl
+                            mx-auto
+                            relative
+                        ">
 
                             {/* 01 */}
                             <div className="
-                bg-[#f3e8df]
-                border border-[#d8c1b3]/60
-                rounded-tl-[32px]
-                rounded-br-[32px]
-                rounded-tr-[12px]
-                rounded-bl-[12px]
-                p-6
-                text-center
-                shadow-[0_10px_28px_rgba(100,70,50,0.05)]
-                transition-transform
-                duration-300
-                hover:-translate-y-1
-                flex flex-col items-center justify-between
-            ">
+                                bg-[#f3e8df]
+                                border border-[#d8c1b3]/60
+                                rounded-tl-[32px]
+                                rounded-br-[32px]
+                                rounded-tr-[12px]
+                                rounded-bl-[12px]
+                                p-6
+                                text-center
+                                shadow-[0_10px_28px_rgba(100,70,50,0.05)]
+                                transition-transform
+                                duration-300
+                                hover:-translate-y-1
+                                flex flex-col items-center justify-between
+                            ">
                                 <span className="
-                    inline-flex
-                    items-center
-                    justify-center
-                    w-9
-                    h-9
-                    rounded-full
-                    bg-white/80
-                    text-[11px]
-                    font-bold
-                    text-[#a50808]
-                    mb-4
-                ">
+                                    inline-flex
+                                    items-center
+                                    justify-center
+                                    w-9
+                                    h-9
+                                    rounded-full
+                                    bg-white/80
+                                    text-[11px]
+                                    font-bold
+                                    text-[#a50808]
+                                    mb-4
+                                ">
                                     01
                                 </span>
                                 <p className="
-                    font-serif
-                    text-base
-                    sm:text-lg
-                    font-medium
-                    leading-snug
-                    text-[#443b48]
-                ">
+                                    font-serif
+                                    text-base
+                                    sm:text-lg
+                                    font-medium
+                                    leading-snug
+                                    text-[#443b48]
+                                ">
                                     Lemon + Orange + Pineapple
                                 </p>
                                 <div className="h-4 md:hidden mt-2 text-[10px] font-bold uppercase tracking-widest text-[#a50808]/70">or</div>
@@ -1945,43 +2808,43 @@ export default function ExportClient() {
 
                             {/* 02 */}
                             <div className="
-                bg-[#e5eadf]
-                border border-[#c7d0bd]/60
-                rounded-tr-[32px]
-                rounded-bl-[32px]
-                rounded-tl-[12px]
-                rounded-br-[12px]
-                p-6
-                text-center
-                shadow-[0_10px_28px_rgba(60,80,50,0.05)]
-                transition-transform
-                duration-300
-                hover:-translate-y-1
-                flex flex-col items-center justify-between
-            ">
+                                bg-[#e5eadf]
+                                border border-[#c7d0bd]/60
+                                rounded-tr-[32px]
+                                rounded-bl-[32px]
+                                rounded-tl-[12px]
+                                rounded-br-[12px]
+                                p-6
+                                text-center
+                                shadow-[0_10px_28px_rgba(60,80,50,0.05)]
+                                transition-transform
+                                duration-300
+                                hover:-translate-y-1
+                                flex flex-col items-center justify-between
+                            ">
                                 <span className="
-                    inline-flex
-                    items-center
-                    justify-center
-                    w-9
-                    h-9
-                    rounded-full
-                    bg-white/80
-                    text-[11px]
-                    font-bold
-                    text-[#5f6b3f]
-                    mb-4
-                ">
+                                    inline-flex
+                                    items-center
+                                    justify-center
+                                    w-9
+                                    h-9
+                                    rounded-full
+                                    bg-white/80
+                                    text-[11px]
+                                    font-bold
+                                    text-[#5f6b3f]
+                                    mb-4
+                                ">
                                     02
                                 </span>
                                 <p className="
-                    font-serif
-                    text-base
-                    sm:text-lg
-                    font-medium
-                    leading-snug
-                    text-[#3d4938]
-                ">
+                                    font-serif
+                                    text-base
+                                    sm:text-lg
+                                    font-medium
+                                    leading-snug
+                                    text-[#3d4938]
+                                ">
                                     Tomato + Onion + Garlic + Herbs
                                 </p>
                                 <div className="h-4 md:hidden mt-2 text-[10px] font-bold uppercase tracking-widest text-[#a50808]/70">or</div>
@@ -1989,43 +2852,43 @@ export default function ExportClient() {
 
                             {/* 03 */}
                             <div className="
-                bg-[#e9e1ed]
-                border border-[#cfc2d5]/60
-                rounded-tl-[32px]
-                rounded-br-[32px]
-                rounded-tr-[12px]
-                rounded-bl-[12px]
-                p-6
-                text-center
-                shadow-[0_10px_28px_rgba(80,60,90,0.05)]
-                transition-transform
-                duration-300
-                hover:-translate-y-1
-                flex flex-col items-center justify-between
-            ">
+                                bg-[#e9e1ed]
+                                border border-[#cfc2d5]/60
+                                rounded-tl-[32px]
+                                rounded-br-[32px]
+                                rounded-tr-[12px]
+                                rounded-bl-[12px]
+                                p-6
+                                text-center
+                                shadow-[0_10px_28px_rgba(80,60,90,0.05)]
+                                transition-transform
+                                duration-300
+                                hover:-translate-y-1
+                                flex flex-col items-center justify-between
+                            ">
                                 <span className="
-                    inline-flex
-                    items-center
-                    justify-center
-                    w-9
-                    h-9
-                    rounded-full
-                    bg-white/80
-                    text-[11px]
-                    font-bold
-                    text-[#75627d]
-                    mb-4
-                ">
+                                    inline-flex
+                                    items-center
+                                    justify-center
+                                    w-9
+                                    h-9
+                                    rounded-full
+                                    bg-white/80
+                                    text-[11px]
+                                    font-bold
+                                    text-[#75627d]
+                                    mb-4
+                                ">
                                     03
                                 </span>
                                 <p className="
-                    font-serif
-                    text-base
-                    sm:text-lg
-                    font-medium
-                    leading-snug
-                    text-[#443b48]
-                ">
+                                    font-serif
+                                    text-base
+                                    sm:text-lg
+                                    font-medium
+                                    leading-snug
+                                    text-[#443b48]
+                                ">
                                     Fruit Powders + Vegetable Powders + Flakes
                                 </p>
                             </div>
@@ -2034,57 +2897,57 @@ export default function ExportClient() {
 
                         {/* OR separators — desktop */}
                         <div className="
-            hidden
-            md:flex
-            max-w-3xl
-            mx-auto
-            justify-between
-            px-[18%]
-            -mt-[26px]
-            mb-[16px]
-            pointer-events-none
-            relative
-            z-30
-        ">
+                            hidden
+                            md:flex
+                            max-w-3xl
+                            mx-auto
+                            justify-between
+                            px-[18%]
+                            -mt-[26px]
+                            mb-[16px]
+                            pointer-events-none
+                            relative
+                            z-30
+                        ">
 
                         </div>
 
                         {/* ================= BOTTOM CONTENT ================= */}
                         <div className="
-            mt-10
-            max-w-xl
-            mx-auto
-            text-center
-        ">
+                            mt-10
+                            max-w-xl
+                            mx-auto
+                            text-center
+                        ">
 
                             <p className="
-                text-sm
-                sm:text-base
-                text-gray-600
-                leading-relaxed
-            ">
+                                text-sm
+                                sm:text-base
+                                text-gray-600
+                                leading-relaxed
+                            ">
                                 Share your complete product list and required quantities with us.
                             </p>
 
                             <div className="
-                mt-5
-                inline-flex
-                items-center
-                justify-center
-                bg-[#f0e7d2]
-                border border-[#d8c8a8]/70
-                rounded-full
-                px-6
-                py-3
-                shadow-[0_6px_18px_rgba(100,80,40,0.05)]
-            ">
+                                mt-5
+                                inline-flex
+                                items-center
+                                justify-center
+                                bg-[#f0e7d2]
+                                border border-[#d8c8a8]/70
+                                rounded-full
+                                px-6
+                                py-3
+                                shadow-[0_6px_18px_rgba(100,80,40,0.05)]
+                            ">
                                 <span className="
-                    text-xs
-                    sm:text-sm
-                    font-semibold
-                    tracking-wide
-                    text-[#5b4d36]
-                ">
+                                    text-xs
+                                    sm:text-sm
+                                    font-semibold
+                                    tracking-wide
+                                    text-[#5b4d36]
+                                ">
                                     One Conversation. Multiple Ingredient Requirements.
                                 </span>
                             </div>
@@ -2094,10 +2957,13 @@ export default function ExportClient() {
                     </div>
                 </section>
 
+                {/* ================= EXPORT INQUIRY FORM ================= */}
+                <ExportInquiryForm />
+
 
                 {/* =========================================================
-    13. FINAL CTA (BANNER)
-========================================================= */}
+                    13. FINAL CTA (BANNER)
+                ========================================================= */}
                 <section className="relative w-full overflow-hidden bg-[#f6f3ec] border-b border-gray-200/80 z-30 font-poppins">
 
                     {/* ================= DESKTOP BACKGROUND BANNER ================= */}
@@ -2160,7 +3026,7 @@ export default function ExportClient() {
                                 </Link>
 
                                 <Link
-                                    href="/contact"
+                                    href="#export-inquiry"
                                     className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full border-2 border-[#243822] text-[#243822] text-xs font-bold uppercase tracking-wider hover:bg-[#243822] hover:text-white transition-all duration-300 hover:-translate-y-0.5 whitespace-nowrap"
                                 >
                                     Send Export Enquiry
